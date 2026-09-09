@@ -29,8 +29,19 @@ class UserFactory extends Factory
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
+            'role' => 'admin',
             'remember_token' => Str::random(10),
         ];
+    }
+
+    /**
+     * State untuk user dengan role pembeli.
+     */
+    public function pembeli(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'pembeli',
+        ]);
     }
 
     /**

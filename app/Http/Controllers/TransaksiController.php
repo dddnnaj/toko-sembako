@@ -2,9 +2,157 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Produk;
+use App\Models\Transaksi;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class TransaksiController extends Controller
 {
-    //
+    /**
+     * Membeli Barang / Checkout (Bisa dilakukan oleh Pembeli yang sudah login).
+     */
+    public function store(Request $request)
+    {
+        $fields = $request->validate([
+            'items'             => 'required|array|min:1',
+            'items.*.produk_id' => 'required|exists:produks,id',
+            'items.*.jumlah'    => 'required|integer|min:1',
+        ]);
+
+        try {
+            $transaksi = DB::transaction(function () use ($request, $fields) {
+                $totalHarga = 0;
+                $itemsToCreate = [];
+
+                // 1. Cek ketersediaan stok & hitung subtotal
+                foreach ($fields['items'] as $item) {
+                    $produk = Produk::lockForUpdate()->find($item['produk_id']);
+
+                    if ($produk->stok < $item['jumlah']) {
+                        throw new \Exception("Stok produk '{$produk->nama_produk}' tidak mencukupi (sisa: {$produk->stok}, diminta: {$item['jumlah']})");
+                    }
+
+                    $subtotal = $produk->harga * $item['jumlah'];
+                    $totalHarga += $subtotal;
+
+                    $itemsToCreate[] = [
+                        'produk'   => $produk,
+                        'jumlah'   => $item['jumlah'],
+                        'subtotal' => $subtotal,
+                    ];
+                }
+
+                // 2. Buat Transaksi Master
+                $transaksiBaru = Transaksi::create([
+                    'user_id'     => $request->user()->id,
+                    'total_harga' => $totalHarga,
+                    'status'      => 'pending',
+                ]);
+
+                // 3. Simpan Detail Transaksi dan Kurangi Stok Produk
+                foreach ($itemsToCreate as $data) {
+                    $transaksiBaru->detailTransaksi()->create([
+                        'produk_id' => $data['produk']->id,
+                        'jumlah'    => $data['jumlah'],
+                        'subtotal'  => $data['subtotal'],
+                    ]);
+
+                    $data['produk']->decrement('stok', $data['jumlah']);
+                }
+
+                return $transaksiBaru;
+            });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Transaksi berhasil dibuat',
+                'data'    => $transaksi->load('detailTransaksi.produk'),
+            ], 201);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * Menampilkan riwayat transaksi.
+     * Pembeli: hanya riwayat milik sendiri.
+     * Admin: melihat seluruh transaksi dari semua pembeli.
+     */
+    public function index(Request $request)
+    {
+        $user = $request->user();
+        $query = Transaksi::with(['user', 'detailTransaksi.produk']);
+
+        if ($user->isPembeli()) {
+            $query->where('user_id', $user->id);
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        $transaksis = $query->latest()->paginate(10);
+
+        return response()->json([
+            'success'      => true,
+            'data'         => $transaksis->items(),
+            'current_page' => $transaksis->currentPage(),
+            'last_page'    => $transaksis->lastPage(),
+            'per_page'     => $transaksis->perPage(),
+            'total'        => $transaksis->total(),
+        ]);
+    }
+
+    /**
+     * Menampilkan detail satu transaksi / nota pesanan.
+     */
+    public function show(Request $request, Transaksi $transaksi)
+    {
+        $user = $request->user();
+
+        // Jika bukan admin dan bukan pemilik transaksi, tolak akses
+        if ($user->isPembeli() && $transaksi->user_id !== $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akses ditolak. Anda tidak memiliki akses ke transaksi ini.',
+            ], 403);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data'    => $transaksi->load(['user', 'detailTransaksi.produk']),
+        ]);
+    }
+
+    /**
+     * Mengubah status pesanan (Khusus Admin).
+     */
+    public function updateStatus(Request $request, Transaksi $transaksi)
+    {
+        $fields = $request->validate([
+            'status' => 'required|string|in:pending,diproses,dikirim,selesai,dibatalkan',
+        ]);
+
+        DB::transaction(function () use ($transaksi, $fields) {
+            // Jika status diubah menjadi 'dibatalkan', kembalikan stok produk
+            if ($fields['status'] === 'dibatalkan' && $transaksi->status !== 'dibatalkan') {
+                foreach ($transaksi->detailTransaksi as $detail) {
+                    $detail->produk()->increment('stok', $detail->jumlah);
+                }
+            }
+
+            $transaksi->update(['status' => $fields['status']]);
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => "Status transaksi berhasil diperbarui menjadi '{$fields['status']}'",
+            'data'    => $transaksi->load('detailTransaksi.produk'),
+        ]);
+    }
 }
