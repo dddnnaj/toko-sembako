@@ -1,5 +1,4 @@
 <?php
-
 namespace Tests\Feature;
 
 use App\Models\Kategori;
@@ -15,9 +14,9 @@ class RoleDanTransaksiApiTest extends TestCase
 
     public function test_pembeli_bisa_melihat_produk_tetapi_ditolak_saat_tambah_produk(): void
     {
-        $pembeli = User::factory()->pembeli()->create();
+        $pembeli  = User::factory()->pembeli()->create();
         $kategori = Kategori::create(['nama_kategori' => 'Beras & Tepung']);
-        $produk = Produk::create([
+        $produk   = Produk::create([
             'kategori_id' => $kategori->id,
             'nama_produk' => 'Beras Pandan Wangi 5kg',
             'harga'       => 75000,
@@ -53,11 +52,104 @@ class RoleDanTransaksiApiTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_pembeli_bisa_menambah_dan_melihat_keranjang(): void
+    {
+        $pembeli  = User::factory()->pembeli()->create();
+        $kategori = Kategori::create(['nama_kategori' => 'Minyak Goreng']);
+        $produk   = Produk::create([
+            'kategori_id' => $kategori->id,
+            'nama_produk' => 'Minyak SunCo 2L',
+            'harga'       => 35000,
+            'stok'        => 10,
+        ]);
+
+        Sanctum::actingAs($pembeli);
+
+        $this->postJson('/api/keranjang', [
+            'produk_id' => $produk->id,
+            'jumlah'    => 2,
+        ])->assertCreated()
+            ->assertJsonPath('data.jumlah', 2)
+            ->assertJsonPath('data.subtotal', 70000);
+
+        $this->getJson('/api/keranjang')
+            ->assertOk()
+            ->assertJsonPath('total_item', 1)
+            ->assertJsonPath('total_harga', 70000)
+            ->assertJsonPath('data.0.produk.id', $produk->id);
+
+        $this->putJson('/api/keranjang/' . $this->getJson('/api/keranjang')->json('data.0.id'), [
+            'jumlah' => 3,
+        ])->assertOk()
+            ->assertJsonPath('data.jumlah', 3)
+            ->assertJsonPath('data.subtotal', 105000);
+    }
+
+    public function test_keranjang_untuk_user_belum_login_dan_kosong_sesuaikan_response(): void
+    {
+        $this->getJson('/api/keranjang')->assertUnauthorized();
+
+        $pembeli = User::factory()->pembeli()->create();
+        Sanctum::actingAs($pembeli);
+
+        $this->getJson('/api/keranjang')
+            ->assertOk()
+            ->assertJsonPath('total_item', 0)
+            ->assertJsonPath('total_harga', 0)
+            ->assertJsonCount(0, 'data');
+    }
+
+    public function test_pembeli_tidak_bisa_akses_keranjang_user_lain(): void
+    {
+        $pemilik  = User::factory()->pembeli()->create();
+        $penyusup = User::factory()->pembeli()->create();
+        $kategori = Kategori::create(['nama_kategori' => 'Minyak Goreng']);
+        $produk   = Produk::create([
+            'kategori_id' => $kategori->id,
+            'nama_produk' => 'Minyak SunCo 2L',
+            'harga'       => 35000,
+            'stok'        => 10,
+        ]);
+
+        Sanctum::actingAs($pemilik);
+        $this->postJson('/api/keranjang', [
+            'produk_id' => $produk->id,
+            'jumlah'    => 2,
+        ])->assertCreated();
+
+        Sanctum::actingAs($penyusup);
+        $this->getJson('/api/keranjang')
+            ->assertOk()
+            ->assertJsonPath('total_item', 0);
+    }
+
+    public function test_checkout_bisa_menerima_item_tanpa_jumlah_dan_mengambil_default_1(): void
+    {
+        $pembeli  = User::factory()->pembeli()->create();
+        $kategori = Kategori::create(['nama_kategori' => 'Minyak Goreng']);
+        $produk   = Produk::create([
+            'kategori_id' => $kategori->id,
+            'nama_produk' => 'Minyak SunCo 2L',
+            'harga'       => 35000,
+            'stok'        => 10,
+        ]);
+
+        Sanctum::actingAs($pembeli);
+
+        $this->postJson('/api/transaksi', [
+            'items' => [[
+                'produk_id' => $produk->id,
+            ]],
+        ])->assertCreated()
+            ->assertJsonPath('data.total_harga', 35000)
+            ->assertJsonPath('data.detail_transaksi.0.jumlah', 1);
+    }
+
     public function test_pembeli_bisa_membeli_barang_dan_stok_berkurang_otomatis(): void
     {
-        $pembeli = User::factory()->pembeli()->create();
+        $pembeli  = User::factory()->pembeli()->create();
         $kategori = Kategori::create(['nama_kategori' => 'Minyak Goreng']);
-        $produk = Produk::create([
+        $produk   = Produk::create([
             'kategori_id' => $kategori->id,
             'nama_produk' => 'Minyak SunCo 2L',
             'harga'       => 35000,
@@ -89,9 +181,81 @@ class RoleDanTransaksiApiTest extends TestCase
             ->assertJsonPath('data.id', $transaksiId);
     }
 
+    public function test_admin_bisa_melihat_dashboard_dengan_statistik_transaksi_yang_benar(): void
+    {
+        $admin    = User::factory()->create(['role' => 'admin']);
+        $pembeli  = User::factory()->pembeli()->create();
+        $kategori = Kategori::create(['nama_kategori' => 'Bumbu']);
+        $produk   = Produk::create([
+            'kategori_id' => $kategori->id,
+            'nama_produk' => 'Garam Dapur 500g',
+            'harga'       => 5000,
+            'stok'        => 100,
+            'deskripsi'   => 'Garam beryodium',
+        ]);
+
+        Sanctum::actingAs($pembeli);
+        $this->postJson('/api/transaksi', [
+            'items' => [[
+                'produk_id' => $produk->id,
+                'jumlah'    => 2,
+            ]],
+        ])->assertCreated();
+
+        Sanctum::actingAs($admin);
+        $this->getJson('/api/dashboard')
+            ->assertOk()
+            ->assertJsonPath('data.total_produk', 1)
+            ->assertJsonPath('data.total_transaksi', 1)
+            ->assertJsonPath('data.total_pendapatan', 10000)
+            ->assertJsonPath('data.total_pelanggan', 1)
+            ->assertJsonPath('data.latest_orders.0.total_harga', 10000);
+    }
+
+    public function test_riwayat_transaksi_menyertakan_bukti_dan_admin_bisa_verifikasi_status(): void
+    {
+        $admin    = User::factory()->create(['role' => 'admin']);
+        $pembeli  = User::factory()->pembeli()->create();
+        $kategori = Kategori::create(['nama_kategori' => 'Bumbu']);
+        $produk   = Produk::create([
+            'kategori_id' => $kategori->id,
+            'nama_produk' => 'Garam Dapur 500g',
+            'harga'       => 5000,
+            'stok'        => 100,
+            'deskripsi'   => 'Garam beryodium',
+        ]);
+
+        Sanctum::actingAs($pembeli);
+        $tResponse = $this->postJson('/api/transaksi', [
+            'items' => [[
+                'produk_id' => $produk->id,
+                'jumlah'    => 2,
+            ]],
+        ])->assertCreated();
+
+        $transaksiId = $tResponse->json('data.id');
+
+        Sanctum::actingAs($pembeli);
+        $this->getJson('/api/riwayat')
+            ->assertOk()
+            ->assertJsonPath('data.0.status', 'pending')
+            ->assertJsonPath('data.0.bukti.nomor', 'INV-' . str_pad((string) $transaksiId, 6, '0', STR_PAD_LEFT))
+            ->assertJsonPath('data.0.bukti.total', 10000);
+
+        Sanctum::actingAs($admin);
+        $this->postJson("/api/transaksi/{$transaksiId}/verifikasi")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'diproses');
+
+        Sanctum::actingAs($pembeli);
+        $this->getJson('/api/riwayat')
+            ->assertOk()
+            ->assertJsonPath('data.0.status', 'diproses');
+    }
+
     public function test_admin_bisa_crud_produk_dan_update_status_pesanan(): void
     {
-        $admin = User::factory()->create(['role' => 'admin']);
+        $admin    = User::factory()->create(['role' => 'admin']);
         $kategori = Kategori::create(['nama_kategori' => 'Bumbu']);
 
         Sanctum::actingAs($admin);
