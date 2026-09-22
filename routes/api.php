@@ -42,6 +42,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/keranjang', [KeranjangController::class, 'store']);
     // checkout HARUS sebelum /{keranjang} agar tidak tertangkap sebagai ID
     Route::post('/keranjang/checkout', [KeranjangController::class, 'checkout']);
+    // Alias kompatibilitas untuk frontend yang memakai endpoint checkout-midtrans.
+    Route::post('/checkout-midtrans', [KeranjangController::class, 'checkout']);
     Route::put('/keranjang/{keranjang}', [KeranjangController::class, 'update']);
     Route::delete('/keranjang', [KeranjangController::class, 'clear']);
     Route::delete('/keranjang/{keranjang}', [KeranjangController::class, 'destroy']);

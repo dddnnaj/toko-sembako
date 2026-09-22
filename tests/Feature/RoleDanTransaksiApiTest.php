@@ -145,6 +145,17 @@ class RoleDanTransaksiApiTest extends TestCase
             ->assertJsonPath('data.detail_transaksi.0.jumlah', 1);
     }
 
+    public function test_endpoint_checkout_midtrans_menggunakan_alur_checkout_yang_sama(): void
+    {
+        $pembeli = User::factory()->pembeli()->create();
+
+        Sanctum::actingAs($pembeli);
+
+        $this->postJson('/api/checkout-midtrans')
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'Keranjang kosong, tidak ada yang di-checkout');
+    }
+
     public function test_pembeli_bisa_membeli_barang_dan_stok_berkurang_otomatis(): void
     {
         $pembeli  = User::factory()->pembeli()->create();
