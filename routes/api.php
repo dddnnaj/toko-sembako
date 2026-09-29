@@ -26,6 +26,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/pelanggan/profil', [PelangganController::class, 'updateProfil']);
     // Jika ingin pakai POST untuk update, bisa ganti menjadi Route::post('/pelanggan/profil', [PelangganController::class, 'updateProfil']);
 
+    // Admin: Menampilkan daftar pelanggan / user
+    Route::get('/admin/users', [PelangganController::class, 'index']);
+    Route::get('/users', [PelangganController::class, 'index']);
+    Route::get('/pelanggan', [PelangganController::class, 'index']);
+    Route::delete('/admin/users/{user}', [PelangganController::class, 'destroy']);
+    Route::delete('/users/{user}', [PelangganController::class, 'destroy']);
+    Route::delete('/pelanggan/{user}', [PelangganController::class, 'destroy']);
+
     // Pembeli & Admin: Melihat Katalog Produk
     Route::get('/products', [ProdukController::class, 'index']);
     Route::get('/products/{product}', [ProdukController::class, 'show']);

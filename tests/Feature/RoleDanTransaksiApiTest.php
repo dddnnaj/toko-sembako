@@ -264,6 +264,47 @@ class RoleDanTransaksiApiTest extends TestCase
             ->assertJsonPath('data.0.status', 'diproses');
     }
 
+    public function test_admin_bisa_melihat_daftar_pelanggan(): void
+    {
+        $admin   = User::factory()->create(['role' => 'admin']);
+        $pembeli = User::factory()->pembeli()->create([
+            'name'   => 'Budi Pelanggan',
+            'email'  => 'budi.pelanggan@example.com',
+            'no_hp'  => '081234567890',
+            'alamat' => 'Jl. Merdeka 12',
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/admin/users')
+            ->assertOk()
+            ->assertJsonPath('data.0.email', 'budi.pelanggan@example.com')
+            ->assertJsonPath('data.0.name', 'Budi Pelanggan')
+            ->assertJsonPath('data.0.role', 'pembeli');
+
+        $this->getJson('/api/users')
+            ->assertOk()
+            ->assertJsonPath('data.0.email', 'budi.pelanggan@example.com');
+    }
+
+    public function test_admin_bisa_menghapus_pelanggan(): void
+    {
+        $admin   = User::factory()->create(['role' => 'admin']);
+        $pembeli = User::factory()->pembeli()->create([
+            'name'  => 'Hapus Pelanggan',
+            'email' => 'hapus.pelanggan@example.com',
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->deleteJson("/api/admin/users/{$pembeli->id}")
+            ->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('message', 'Akun pelanggan berhasil dihapus');
+
+        $this->assertDatabaseMissing('users', ['id' => $pembeli->id]);
+    }
+
     public function test_admin_bisa_crud_produk_dan_update_status_pesanan(): void
     {
         $admin    = User::factory()->create(['role' => 'admin']);
